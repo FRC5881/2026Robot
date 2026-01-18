@@ -5,11 +5,12 @@
 package frc.robot;
 
 import java.io.File;
+import java.util.function.Supplier;
 
+import edu.wpi.first.epilogue.Epilogue;
 import edu.wpi.first.epilogue.Logged;
 import edu.wpi.first.math.geometry.Pose3d;
-import edu.wpi.first.math.geometry.Translation2d;
-import edu.wpi.first.math.util.Units;
+import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.Filesystem;
@@ -17,28 +18,34 @@ import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandPS5Controller;
 import frc.robot.Constants.OperatorConstants;
+import frc.robot.subsystems.IntakeSubsystem;
+import frc.robot.subsystems.ShooterSubsystem;
 import frc.robot.subsystems.SwerveSubsystem;
 import swervelib.SwerveInputStream;
 import swervelib.simulation.ironmaple.simulation.SimulatedArena;
 import swervelib.simulation.ironmaple.simulation.seasonspecific.rebuilt2026.Arena2026Rebuilt;
-import swervelib.simulation.ironmaple.simulation.seasonspecific.rebuilt2026.RebuiltFuelOnField;
 
 @Logged
 public class Robot extends TimedRobot {
   final CommandPS5Controller driver = new CommandPS5Controller(0);
   private final SwerveSubsystem drivebase;
+  private final IntakeSubsystem intake;
+  private final ShooterSubsystem shooter;
 
   private Command m_autonomousCommand;
 
   public Robot() {
-    Arena2026Rebuilt rebuilt = new Arena2026Rebuilt(true);
-    rebuilt.setEfficiencyMode(false);
+    Arena2026Rebuilt rebuilt = new Arena2026Rebuilt(false);
+    rebuilt.setEfficiencyMode(true);
     rebuilt.resetFieldForAuto();
     SimulatedArena.overrideInstance(rebuilt);
 
     drivebase = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(), "swerve"));
+    intake = new IntakeSubsystem(drivebase.getMapleSimDrive());
+    shooter = new ShooterSubsystem();
 
     /**
      * Converts driver input into a field-relative ChassisSpeeds that is controlled
@@ -55,19 +62,41 @@ public class Robot extends TimedRobot {
     SwerveInputStream driveAngularVelocityKeyboard = SwerveInputStream.of(drivebase.getSwerveDrive(),
         () -> -driver.getRawAxis(1),
         () -> -driver.getRawAxis(0))
-        .withControllerRotationAxis(() -> driver.getRawAxis(3))
+        .withControllerRotationAxis(() -> -driver.getRawAxis(3))
         .deadband(OperatorConstants.DEADBAND)
         .scaleTranslation(0.8)
-        .allianceRelativeControl(true);
+        .robotRelative(true);
 
     Command driveFieldOrientedAnglularVelocity = drivebase.driveFieldOriented(driveAngularVelocity);
     Command driveFieldOrientedAnglularVelocityKeyboard = drivebase.driveFieldOriented(driveAngularVelocityKeyboard);
 
     if (RobotBase.isSimulation()) {
       drivebase.setDefaultCommand(driveFieldOrientedAnglularVelocityKeyboard);
+
+      Supplier<Command> simulatedLaunch = () -> Commands.runEnd(() -> shooter.run(1.0), () -> shooter.run(0), shooter)
+          .alongWith(
+              Commands.runOnce(() -> {
+                if (intake.obtainFuelFromSim()) {
+                  shooter.simLaunchFuel(drivebase.getPose(), drivebase.getFieldVelocity());
+                }
+              }).andThen(Commands.waitSeconds(0.25)).repeatedly());
+
+      driver.button(1).whileTrue(
+        Commands.runOnce(() -> shooter.setTurretAngle(Rotation2d.kZero)).andThen(simulatedLaunch.get())
+      );
+      driver.button(2).whileTrue(
+        Commands.runOnce(() -> shooter.setTurretAngle(Rotation2d.fromDegrees(-90))).andThen(simulatedLaunch.get())
+      );
+      driver.button(4).whileTrue(
+          Commands.runOnce(() -> shooter.setTurretAngle(Rotation2d.fromDegrees(90))).andThen(simulatedLaunch.get())
+      );
+
+      driver.L1().whileTrue(Commands.runEnd(intake::runIntake, intake::stopIntake, intake));
     } else {
       drivebase.setDefaultCommand(driveFieldOrientedAnglularVelocity);
     }
+
+    Epilogue.bind(this);
   }
 
   @Override
