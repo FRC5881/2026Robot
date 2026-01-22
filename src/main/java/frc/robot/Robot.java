@@ -6,7 +6,6 @@ package frc.robot;
 
 import java.io.File;
 import java.util.function.Supplier;
-
 import edu.wpi.first.epilogue.Epilogue;
 import edu.wpi.first.epilogue.Logged;
 import edu.wpi.first.math.geometry.Pose3d;
@@ -62,7 +61,7 @@ public class Robot extends TimedRobot {
     SwerveInputStream driveAngularVelocityKeyboard = SwerveInputStream.of(drivebase.getSwerveDrive(),
         () -> -driver.getRawAxis(1),
         () -> -driver.getRawAxis(0))
-        .withControllerRotationAxis(() -> -driver.getRawAxis(3))
+        .withControllerRotationAxis(() -> -driver.getRawAxis(2))
         .deadband(OperatorConstants.DEADBAND)
         .scaleTranslation(0.8)
         .robotRelative(true);
@@ -73,13 +72,15 @@ public class Robot extends TimedRobot {
     if (RobotBase.isSimulation()) {
       drivebase.setDefaultCommand(driveFieldOrientedAnglularVelocityKeyboard);
 
-      Supplier<Command> simulatedLaunch = () -> Commands.runEnd(() -> shooter.run(1.0), () -> shooter.run(0), shooter)
+      Supplier<Command> simulatedLaunch = () -> Commands.runEnd(() -> shooter.runAtRMP(3130), () -> shooter.stop(), shooter)
           .alongWith(
               Commands.runOnce(() -> {
                 if (intake.obtainFuelFromSim()) {
                   shooter.simLaunchFuel(drivebase.getPose(), drivebase.getFieldVelocity());
                 }
               }).andThen(Commands.waitSeconds(0.25)).repeatedly());
+
+      m_autonomousCommand = simulatedLaunch.get();
 
       driver.button(1).whileTrue(
         Commands.runOnce(() -> shooter.setTurretAngle(Rotation2d.kZero)).andThen(simulatedLaunch.get())

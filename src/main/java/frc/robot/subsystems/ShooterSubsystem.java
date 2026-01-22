@@ -4,9 +4,10 @@ import static edu.wpi.first.units.Units.Amps;
 import static edu.wpi.first.units.Units.Degrees;
 import static edu.wpi.first.units.Units.Inches;
 import static edu.wpi.first.units.Units.MetersPerSecond;
-import static edu.wpi.first.units.Units.Volts;
 
 import edu.wpi.first.epilogue.Logged;
+import edu.wpi.first.math.controller.PIDController;
+import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Translation2d;
@@ -25,6 +26,9 @@ import swervelib.simulation.ironmaple.simulation.seasonspecific.rebuilt2026.Rebu
 public class ShooterSubsystem extends SubsystemBase {
     private final FlywheelSim flywheelSim;
     public Rotation2d simulatedAngle;
+    private SimpleMotorFeedforward feedforward = new SimpleMotorFeedforward(0, 11.0/5293.75);
+    private PIDController controller = new PIDController(0.0005, 0, 0);
+    private double targetRPM = 3130.0;
 
     public ShooterSubsystem() {
         // (4 inch diameter) 2x 0.8 lb flywheels 2x 0.3 lb wheels
@@ -38,6 +42,15 @@ public class ShooterSubsystem extends SubsystemBase {
 
         SimulatedBattery.addElectricalAppliances(() -> Amps.of(flywheelSim.getCurrentDrawAmps()));
     }
+
+    public double getVoltage() {
+        if (Robot.isSimulation()) {
+            return flywheelSim.getInputVoltage();
+        } else {
+            return 0; // todo real robot
+        }
+    }
+
 
     public double velocityRPM() {
         if (Robot.isSimulation()) {
@@ -55,10 +68,17 @@ public class ShooterSubsystem extends SubsystemBase {
     private static final Translation2d launcherOffset = new Translation2d(
             Units.inchesToMeters(29 - 12.5 / 2), 0);
 
-    public void run(double percent) {
+    public void runAtRMP(double speedRPM) {
+        targetRPM = speedRPM;
         if (Robot.isSimulation()) {
-            flywheelSim.setInputVoltage(SimulatedBattery.getBatteryVoltage().in(Volts) * percent);
+            double ff = feedforward.calculate(targetRPM);
+            double pid = controller.calculate(flywheelSim.getAngularVelocityRPM(), targetRPM);
+            flywheelSim.setInputVoltage(ff + pid);
         }
+    }
+
+    public void stop() {
+        flywheelSim.setInputVoltage(0);;
     }
 
     public void setTurretAngle(Rotation2d angle) {
