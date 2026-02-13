@@ -5,16 +5,15 @@
 package frc.robot;
 
 import java.io.File;
-import java.util.function.Supplier;
+
 import edu.wpi.first.epilogue.Epilogue;
 import edu.wpi.first.epilogue.Logged;
 import edu.wpi.first.math.geometry.Pose3d;
-import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.Filesystem;
-import edu.wpi.first.wpilibj.RobotBase;
 import edu.wpi.first.wpilibj.TimedRobot;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
@@ -44,7 +43,11 @@ public class Robot extends TimedRobot {
 
     drivebase = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(), "swerve"));
     intake = new IntakeSubsystem(drivebase.getMapleSimDrive());
-    shooter = new ShooterSubsystem();
+    shooter = new ShooterSubsystem(drivebase);
+
+    CommandScheduler.getInstance().schedule(
+      Commands.runOnce(() -> rebuilt.clearGamePieces()).andThen(Commands.waitSeconds(10)).repeatedly()
+    );
 
     /**
      * Converts driver input into a field-relative ChassisSpeeds that is controlled
@@ -69,28 +72,18 @@ public class Robot extends TimedRobot {
     Command driveFieldOrientedAnglularVelocity = drivebase.driveFieldOriented(driveAngularVelocity);
     Command driveFieldOrientedAnglularVelocityKeyboard = drivebase.driveFieldOriented(driveAngularVelocityKeyboard);
 
-    if (RobotBase.isSimulation()) {
+    if (Robot.isSimulation()) {
       drivebase.setDefaultCommand(driveFieldOrientedAnglularVelocityKeyboard);
 
-      Supplier<Command> simulatedLaunch = () -> Commands.runEnd(() -> shooter.runAtRMP(3130), () -> shooter.stop(), shooter)
-          .alongWith(
-              Commands.runOnce(() -> {
-                if (intake.obtainFuelFromSim()) {
-                  shooter.simLaunchFuel(drivebase.getPose(), drivebase.getFieldVelocity());
-                }
-              }).andThen(Commands.waitSeconds(0.25)).repeatedly());
-
-      m_autonomousCommand = simulatedLaunch.get();
-
-      driver.button(1).whileTrue(
-        Commands.runOnce(() -> shooter.setTurretAngle(Rotation2d.kZero)).andThen(simulatedLaunch.get())
-      );
+      SmartDashboard.putNumber("Shooter/targetRPM", 0.0);
+      Command shoot = Commands.runEnd(() -> shooter.run(SmartDashboard.getNumber("Shooter/targetRPM", 0)), () -> shooter.stop(), shooter);
       driver.button(2).whileTrue(
-        Commands.runOnce(() -> shooter.setTurretAngle(Rotation2d.fromDegrees(-90))).andThen(simulatedLaunch.get())
-      );
-      driver.button(4).whileTrue(
-          Commands.runOnce(() -> shooter.setTurretAngle(Rotation2d.fromDegrees(90))).andThen(simulatedLaunch.get())
-      );
+          shoot.alongWith(
+              Commands.runOnce(() -> {
+                // if (intake.obtainFuelFromSim()) {
+                  shooter.simLaunchFuel();
+                // }
+              }).andThen(Commands.waitSeconds(0.25)).repeatedly()));
 
       driver.L1().whileTrue(Commands.runEnd(intake::runIntake, intake::stopIntake, intake));
     } else {

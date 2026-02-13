@@ -31,6 +31,7 @@ import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
 import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.simulation.DriverStationSim;
+import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
@@ -82,9 +83,11 @@ public class SwerveSubsystem extends SubsystemBase {
   public SwerveSubsystem(File directory) {
     DriverStationSim.setAllianceStationId(AllianceStationID.Blue2);
     boolean blueAlliance = true;
-    Pose2d startingPose = blueAlliance ? new Pose2d(new Translation2d(Meter.of(1),
-        Meter.of(4)),
-        Rotation2d.fromDegrees(0))
+    Pose2d startingPose = blueAlliance ? new Pose2d(new Translation2d(
+        //Dont lose this again
+        Meter.of(1),
+        Meter.of(1)),
+        Rotation2d.fromDegrees(4))
         : new Pose2d(new Translation2d(Meter.of(16),
             Meter.of(4)),
             Rotation2d.fromDegrees(180));
@@ -497,6 +500,14 @@ public class SwerveSubsystem extends SubsystemBase {
    */
   public void drive(ChassisSpeeds velocity) {
     swerveDrive.drive(velocity);
+  }
+
+  /**
+   * Returns the simulated Field
+   * @return {@link Field2d}
+   */
+  public Field2d getField() {
+    return swerveDrive.field;
   }
 
   /**
