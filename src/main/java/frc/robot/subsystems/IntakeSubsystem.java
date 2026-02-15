@@ -10,6 +10,11 @@ import swervelib.simulation.ironmaple.simulation.IntakeSimulation;
 import swervelib.simulation.ironmaple.simulation.IntakeSimulation.IntakeSide;
 import swervelib.simulation.ironmaple.simulation.drivesims.SwerveDriveSimulation;
 
+/**
+ * The intake has 2 motors
+ * - mRoller spins the rollers required for picking up fuel
+ * - mArm extends and retracts the intake
+ */
 public class IntakeSubsystem extends SubsystemBase {
     private static final int kSimulationMaxFuel = 40;
     private IntakeSimulation intakeSimulation = null;

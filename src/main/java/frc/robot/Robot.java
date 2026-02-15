@@ -13,15 +13,17 @@ import edu.wpi.first.networktables.NetworkTableInstance;
 import edu.wpi.first.networktables.StructArrayPublisher;
 import edu.wpi.first.wpilibj.Filesystem;
 import edu.wpi.first.wpilibj.TimedRobot;
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.CommandScheduler;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.button.CommandPS5Controller;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import frc.robot.Constants.OperatorConstants;
 import frc.robot.subsystems.IntakeSubsystem;
-import frc.robot.subsystems.ShooterSubsystem;
+import frc.robot.subsystems.LauncherSubsystem;
 import frc.robot.subsystems.SwerveSubsystem;
+import frc.robot.subsystems.TurretSubsystem;
 import swervelib.SwerveInputStream;
 import swervelib.simulation.ironmaple.simulation.SimulatedArena;
 import swervelib.simulation.ironmaple.simulation.seasonspecific.rebuilt2026.Arena2026Rebuilt;
@@ -31,9 +33,10 @@ public class Robot extends TimedRobot {
   final CommandPS5Controller driver = new CommandPS5Controller(0);
   private final SwerveSubsystem drivebase;
   private final IntakeSubsystem intake;
-  private final ShooterSubsystem shooter;
+  private final TurretSubsystem turret;
+  private final LauncherSubsystem shooter;
 
-  private Command m_autonomousCommand;
+  private final SendableChooser<Command> autoChooser = new SendableChooser<>();
 
   public Robot() {
     Arena2026Rebuilt rebuilt = new Arena2026Rebuilt(false);
@@ -43,11 +46,21 @@ public class Robot extends TimedRobot {
 
     drivebase = new SwerveSubsystem(new File(Filesystem.getDeployDirectory(), "swerve"));
     intake = new IntakeSubsystem(drivebase.getMapleSimDrive());
-    shooter = new ShooterSubsystem(drivebase);
+    turret = new TurretSubsystem(drivebase);
+    shooter = new LauncherSubsystem(drivebase, turret);
 
-    CommandScheduler.getInstance().schedule(
-      Commands.runOnce(() -> rebuilt.clearGamePieces()).andThen(Commands.waitSeconds(10)).repeatedly()
-    );
+    autoChooser.addOption(
+        "Launcher SysId (Quasistatic Forward)",
+        shooter.launcherSysId.quasistatic(SysIdRoutine.Direction.kForward));
+    autoChooser.addOption(
+        "Launcher SysId (Quasistatic Reverse)",
+        shooter.launcherSysId.quasistatic(SysIdRoutine.Direction.kReverse));
+    autoChooser.addOption(
+        "Launcher SysId (Dynamic Forward)",
+        shooter.launcherSysId.dynamic(SysIdRoutine.Direction.kForward));
+    autoChooser.addOption(
+        "Launcher SysId (Dynamic Reverse)",
+        shooter.launcherSysId.dynamic(SysIdRoutine.Direction.kReverse));
 
     /**
      * Converts driver input into a field-relative ChassisSpeeds that is controlled
@@ -75,20 +88,22 @@ public class Robot extends TimedRobot {
     if (Robot.isSimulation()) {
       drivebase.setDefaultCommand(driveFieldOrientedAnglularVelocityKeyboard);
 
-      SmartDashboard.putNumber("Shooter/targetRPM", 0.0);
-      Command shoot = Commands.runEnd(() -> shooter.run(SmartDashboard.getNumber("Shooter/targetRPM", 0)), () -> shooter.stop(), shooter);
+      // X button - run the shooter via network tables & simulate launching a fuel
+      // every 1/4 second
       driver.button(2).whileTrue(
-          shoot.alongWith(
-              Commands.runOnce(() -> {
-                // if (intake.obtainFuelFromSim()) {
-                  shooter.simLaunchFuel();
-                // }
-              }).andThen(Commands.waitSeconds(0.25)).repeatedly()));
-
-      driver.L1().whileTrue(Commands.runEnd(intake::runIntake, intake::stopIntake, intake));
+          Commands.repeatingSequence(Commands.runOnce(() -> {
+            if (intake.obtainFuelFromSim())
+              shooter.simLaunchFuel();
+          }), Commands.waitSeconds(0.25))
+              .alongWith(shooter.cRunLauncherSmartDashboard().alongWith()));
     } else {
       drivebase.setDefaultCommand(driveFieldOrientedAnglularVelocity);
+
+      // X button - run the shooter via network tables
+      driver.cross().whileTrue(shooter.cRunLauncherSmartDashboard());
     }
+
+    driver.L1().whileTrue(Commands.runEnd(intake::runIntake, intake::stopIntake, intake));
 
     Epilogue.bind(this);
   }
@@ -127,10 +142,13 @@ public class Robot extends TimedRobot {
   public void disabledExit() {
   }
 
+  private Command autonomousCommand;
+
   @Override
   public void autonomousInit() {
-    if (m_autonomousCommand != null) {
-      CommandScheduler.getInstance().schedule(m_autonomousCommand);
+    autonomousCommand = autoChooser.getSelected();
+    if (autonomousCommand != null) {
+      CommandScheduler.getInstance().schedule(autonomousCommand);
     }
   }
 
@@ -144,8 +162,8 @@ public class Robot extends TimedRobot {
 
   @Override
   public void teleopInit() {
-    if (m_autonomousCommand != null) {
-      m_autonomousCommand.cancel();
+    if (autonomousCommand != null) {
+      autonomousCommand.cancel();
     }
   }
 
