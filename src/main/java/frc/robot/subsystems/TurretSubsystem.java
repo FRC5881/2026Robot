@@ -2,8 +2,6 @@ package frc.robot.subsystems;
 
 import static edu.wpi.first.units.Units.Amps;
 
-import java.util.Optional;
-
 import com.revrobotics.PersistMode;
 import com.revrobotics.ResetMode;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
@@ -11,6 +9,7 @@ import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
+import edu.wpi.first.epilogue.Logged;
 import edu.wpi.first.math.MathUtil;
 import edu.wpi.first.math.controller.ProfiledPIDController;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
@@ -24,15 +23,14 @@ import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.system.plant.LinearSystemId;
 import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.math.util.Units;
-import edu.wpi.first.wpilibj.DriverStation;
-import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.simulation.DCMotorSim;
+import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
-import frc.robot.Target;
 import swervelib.simulation.ironmaple.simulation.motorsims.SimulatedBattery;
 import frc.robot.Robot;
 
+@Logged
 public class TurretSubsystem extends SubsystemBase {
     private final SwerveSubsystem drive;
     private final SparkMax mTurret = new SparkMax(12, MotorType.kBrushless);
@@ -131,14 +129,7 @@ public class TurretSubsystem extends SubsystemBase {
      * @param target Target position in field coordinates (meters)
      * @return Desired turret angle in the robot's reference frame
      */
-    public Rotation2d angleToTarget(Target target) {
-        Optional<Alliance> alliance = DriverStation.getAlliance();
-        if (alliance.isEmpty()) {
-            return Rotation2d.kZero;
-        }
-
-        Translation2d targetPosition = target.getPosition(alliance.get());
-
+    public Rotation2d angleToTarget(Translation2d target) {
         // Current robot pose (field-relative)
         Pose2d robotPose = drive.getPose();
 
@@ -146,10 +137,10 @@ public class TurretSubsystem extends SubsystemBase {
         Pose2d turretPose = turretInFieldRelative().toPose2d();
 
         // Vector from turret to target (still field-relative)
-        Translation2d turretToTargetVector = targetPosition.minus(turretPose.getTranslation());
+        Translation2d turretToTarget = target.minus(turretPose.getTranslation());
 
         // Absolute angle from turret to target (field frame)
-        Rotation2d fieldRelativeAngleToTarget = turretToTargetVector.getAngle();
+        Rotation2d fieldRelativeAngleToTarget = turretToTarget.getAngle();
 
         // Convert field-relative angle into robot-relative angle
         return fieldRelativeAngleToTarget.minus(robotPose.getRotation());
@@ -162,14 +153,9 @@ public class TurretSubsystem extends SubsystemBase {
      * @param target
      * @return Distance in meters
      */
-    public double distanceToTarget(Target target) {
-        Optional<Alliance> alliance = DriverStation.getAlliance();
-        if (alliance.isEmpty()) {
-            return 0.0;
-        }
-
+    public double distanceToTarget(Translation2d target) {
         Translation2d turretPosition = turretInFieldRelative().getTranslation().toTranslation2d();
-        return turretPosition.getDistance(target.getPosition(alliance.get()));
+        return turretPosition.getDistance(target);
     }
 
     /**
@@ -178,41 +164,36 @@ public class TurretSubsystem extends SubsystemBase {
      *
      * Positive/negative sign indicates direction of error.
      */
-    public Rotation2d getTurretAngleError(Target target) {
+    public Rotation2d getTurretAngleError(Translation2d target) {
         return angleToTarget(target).minus(getTurretAngle());
     }
 
     /**
-     * Determines whether the turret is aimed accurately enough
-     * to safely shoot.
+     * Determines whether the turret is aimed accurately enough to safely shoot at a
+     * target. Some targets require different levels of accuracy and the further the
+     * away we are the more true we need our aim to be.
+     * 
+     * @param target             Field Relative target we're aiming at
+     * @param maxAcceptableError is the maximum distance we're willing to be off by
      */
-    public boolean isTurretAimedWithinTolerance(Target target) {
+    public boolean isTurretAimedWithinTolerance(Translation2d target, double maxAcceptableError) {
         double missDistance = getTurretAngleError(target).getSin() * distanceToTarget(target);
-        return Math.abs(missDistance) <= target.maxAcceptableError();
+        return Math.abs(missDistance) <= maxAcceptableError;
     }
 
     /**
      * Aims the turret at the current scoring target.
      *
      * This method:
-     * 1. Computes the desired turret angle.
+     * 1. Takes the desired turret angle (in the robot's reference frame).
      * 2. Clamps it to the mechanical limits of the turret.
      * 3. Uses a profiled PID controller to generate feedback voltage.
      * 4. Adds feedforward voltage based on desired velocity.
      * 5. Sends the combined voltage to the turret motor.
      */
-    private void aimTurretAtTarget(Target target) {
-        Optional<Alliance> alliance = DriverStation.getAlliance();
-        if (alliance.isEmpty()) {
-            // If we do not know our alliance, we do not know which target to aim at.
-            return;
-        }
-
-        // Desired turret angle (rotations) (robot-relative)
-        double desiredTurretAngle = angleToTarget(target).getRotations();
-
+    public void aimTurret(Rotation2d robotRelativeRotation) {
         // Clamp to turret mechanical limits (±0.25 rotations = ±90 degrees)
-        double clampedGoalRotations = MathUtil.clamp(desiredTurretAngle, -0.25, 0.25);
+        double clampedGoalRotations = MathUtil.clamp(robotRelativeRotation.getRotations(), -0.25, 0.25);
 
         // Tell the profiled PID controller our new goal position
         turretController.setGoal(clampedGoalRotations);
@@ -234,6 +215,15 @@ public class TurretSubsystem extends SubsystemBase {
         }
     }
 
+    /**
+     * Aims the turret at a field relative target
+     * 
+     * @param target
+     */
+    private void aimTurret(Translation2d target) {
+        aimTurret(angleToTarget(target));
+    }
+
     public void stop() {
         if (Robot.isReal()) {
             mTurret.stopMotor();
@@ -243,12 +233,19 @@ public class TurretSubsystem extends SubsystemBase {
     }
 
     /**
-     * Builds a command that has the turret aim at a target
-     * 
-     * @param target The selected {@code Target}
-     * @return the Command
+     * Creates a command that points the turret towards an angle assigned for
+     * network tables
+     *
+     * The dashboard key used is {@code "Turret/targetDegrees"}.
+     * The turret will continuously update to match the dashboard value
+     * while the command is scheduled.
      */
-    public Command cAimAtTarget(Target target) {
-        return runEnd(() -> aimTurretAtTarget(target), this::stop);
+    public Command cRunTurretSmartDashboard() {
+        SmartDashboard.putNumber("Turret/targetDegrees", 0);
+        return runEnd(() -> {
+            double angle = SmartDashboard.getNumber("Turret/targetDegrees", -90);
+            aimTurret(Rotation2d.fromDegrees(angle));
+        }, this::stop);
     }
+
 }

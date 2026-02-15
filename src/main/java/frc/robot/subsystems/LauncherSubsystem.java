@@ -32,7 +32,6 @@ import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Config;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Mechanism;
-import frc.robot.Target;
 import frc.robot.Robot;
 import swervelib.simulation.ironmaple.simulation.SimulatedArena;
 import swervelib.simulation.ironmaple.simulation.motorsims.SimulatedBattery;
@@ -119,50 +118,6 @@ public class LauncherSubsystem extends SubsystemBase {
     }
 
     /**
-     * Runs the launcher flywheel at the correct speed for the current target.
-     *
-     * Steps:
-     * 1. Measure distance to the target.
-     * 2. Look up the required flywheel velocity from a distance → velocity map.
-     * 3. Use feedforward to predict how much voltage is needed.
-     * 4. Use PID to correct any velocity error.
-     * 5. Send the combined voltage to the motor (or simulation).
-     */
-    private void maintainLauncherSpeed(Target target) {
-        double desiredVelocityRPM;
-
-        // Select the correct distance-to-velocity map depending on which target we are
-        // using. Different targets require different trajectories.
-        double distanceMeters = turret.distanceToTarget(target);
-        if (target.equals(Target.kHub)) {
-            desiredVelocityRPM = hubDistanceMap.get(distanceMeters);
-        } else {
-            desiredVelocityRPM = passingDistanceMap.get(distanceMeters);
-        }
-
-        runLauncher(desiredVelocityRPM);
-    }
-
-    /**
-     * Creates a command that continuously runs the launcher at the
-     * correct velocity for the specified target.
-     *
-     * This command:
-     * - Measures distance to the given {@code LauncherTarget}
-     * - Determines the required flywheel RPM from the appropriate distance map
-     * - Applies feedforward + PID control to maintain that velocity</li>
-     *
-     * The launcher will stop automatically when the command ends
-     * or is interrupted.
-     *
-     * @param target The scoring target (e.g., hub or passing target)
-     * @return A command that maintains launcher speed for the given target
-     */
-    public Command cRunLauncherTarget(Target target) {
-        return runEnd(() -> maintainLauncherSpeed(target), this::stop);
-    }
-
-    /**
      * Runs the launcher flywheel at a defined velocity
      * 
      * @param desiredVelocityRPM
@@ -180,21 +135,30 @@ public class LauncherSubsystem extends SubsystemBase {
     }
 
     /**
+     * Runs the launcher flywheel at the correct speed for the current target.
+     */
+    private void runLauncher(Translation2d target, boolean isHub) {
+        double velocity;
+
+        // Select the correct distance-to-velocity map depending on which target we are
+        // using. Different targets require different trajectories.
+        double distanceMeters = turret.distanceToTarget(target);
+        if (isHub) {
+            velocity = hubDistanceMap.get(distanceMeters);
+        } else {
+            velocity = passingDistanceMap.get(distanceMeters);
+        }
+
+        runLauncher(velocity);
+    }
+
+    /**
      * Creates a command that runs the launcher using a velocity
      * provided from SmartDashboard.
-     *
-     * This is primarily intended for:
-     * - Testing and tuning flywheel PID/Feedforward constants
-     * - Manual operator control during development
      *
      * The dashboard key used is {@code "Launcher/targetRPM"}.
      * The launcher will continuously update to match the dashboard value
      * while the command is scheduled.
-     *
-     * The launcher will stop automatically when the command ends
-     * or is interrupted.
-     *
-     * @return A command that runs the launcher at a dashboard-defined RPM
      */
     public Command cRunLauncherSmartDashboard() {
         SmartDashboard.putNumber("Launcher/targetRPM", 0);
