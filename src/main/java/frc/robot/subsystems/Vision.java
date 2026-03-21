@@ -16,6 +16,7 @@ import edu.wpi.first.math.numbers.N3;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.Alert;
 import edu.wpi.first.wpilibj.Alert.AlertType;
+import edu.wpi.first.wpilibj.Timer;
 import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import frc.robot.Robot;
 import java.awt.Desktop;
@@ -46,8 +47,8 @@ public class Vision {
     /**
      * April Tag Field Layout of the year.
      */
-    public static final AprilTagFieldLayout fieldLayout = AprilTagFieldLayout
-            .loadField(AprilTagFields.k2026RebuiltAndymark);
+    public static final AprilTagFieldLayout fieldLayout = AprilTagFieldLayout.loadField(
+            AprilTagFields.k2026RebuiltAndymark);
 
     /**
      * Photon Vision Simulation
@@ -92,7 +93,8 @@ public class Vision {
      *
      * @param aprilTag    The ID of the AprilTag.
      * @param robotOffset The offset {@link Transform2d} of the robot to apply to
-     *                    the pose for the robot to position itself correctly.
+     *                    the pose for the robot to position
+     *                    itself correctly.
      * @return The target pose of the AprilTag.
      */
     public static Pose2d getAprilTagPose(int aprilTag, Transform2d robotOffset) {
@@ -102,6 +104,7 @@ public class Vision {
         } else {
             throw new RuntimeException("Cannot get AprilTag " + aprilTag + " from field " + fieldLayout.toString());
         }
+
     }
 
     /**
@@ -124,12 +127,13 @@ public class Vision {
              */
             visionSim.update(swerveDrive.getSimulationDriveTrainPose().get());
         }
-
         for (Cameras camera : Cameras.values()) {
+            camera.poseEstimator.addHeadingData(Timer.getFPGATimestamp(), swerveDrive.getPose().getRotation());
             Optional<EstimatedRobotPose> poseEst = getEstimatedGlobalPose(camera);
             if (poseEst.isPresent()) {
                 var pose = poseEst.get();
-                swerveDrive.addVisionMeasurement(pose.estimatedPose.toPose2d(), pose.timestampSeconds,
+                swerveDrive.addVisionMeasurement(pose.estimatedPose.toPose2d(),
+                        pose.timestampSeconds,
                         camera.curStdDevs);
             }
         }
@@ -253,11 +257,11 @@ public class Vision {
         /**
          * Center Camera
          */
-        CENTER_CAM("center",
+        CENTER_CAM("Tags",
                 new Rotation3d(0, Units.degreesToRadians(0), Units.degreesToRadians(0)),
-                new Translation3d(Units.inchesToMeters(12.5),
-                        Units.inchesToMeters(0),
-                        Units.inchesToMeters(12.5)),
+                new Translation3d(Units.inchesToMeters(1),
+                        Units.inchesToMeters(12.5-3.75),
+                        Units.inchesToMeters(13)),
                 VecBuilder.fill(4, 4, 8), VecBuilder.fill(0.5, 0.5, 1));
 
         /**
@@ -331,7 +335,7 @@ public class Vision {
             poseEstimator = new PhotonPoseEstimator(Vision.fieldLayout,
                     PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR,
                     robotToCamTransform);
-            poseEstimator.setMultiTagFallbackStrategy(PoseStrategy.LOWEST_AMBIGUITY);
+            poseEstimator.setMultiTagFallbackStrategy(PoseStrategy.MULTI_TAG_PNP_ON_COPROCESSOR);
 
             this.singleTagStdDevs = singleTagStdDevs;
             this.multiTagStdDevs = multiTagStdDevsMatrix;
@@ -367,8 +371,44 @@ public class Vision {
         }
 
         /**
+         * Get the result with the least ambiguity from the best tracked target within
+         * the Cache. This may not be the most recent result!
+         *
+         * @return The result in the cache with the least ambiguous best tracked target.
+         *         This is not the most recent result!
+         */
+        public Optional<PhotonPipelineResult> getBestResult() {
+            if (resultsList.isEmpty()) {
+                return Optional.empty();
+            }
+
+            PhotonPipelineResult bestResult = resultsList.get(0);
+            double amiguity = bestResult.getBestTarget().getPoseAmbiguity();
+            double currentAmbiguity = 0;
+            for (PhotonPipelineResult result : resultsList) {
+                currentAmbiguity = result.getBestTarget().getPoseAmbiguity();
+                if (currentAmbiguity < amiguity && currentAmbiguity > 0) {
+                    bestResult = result;
+                    amiguity = currentAmbiguity;
+                }
+            }
+            return Optional.of(bestResult);
+        }
+
+        /**
+         * Get the latest result from the current cache.
+         *
+         * @return Empty optional if nothing is found. Latest result if something is
+         *         there.
+         */
+        public Optional<PhotonPipelineResult> getLatestResult() {
+            return resultsList.isEmpty() ? Optional.empty() : Optional.of(resultsList.get(0));
+        }
+
+        /**
          * Get the estimated robot pose. Updates the current robot pose estimation,
-         * standard deviations, and flushes the cache of results.
+         * standard deviations, and flushes the
+         * cache of results.
          *
          * @return Estimated pose.
          */

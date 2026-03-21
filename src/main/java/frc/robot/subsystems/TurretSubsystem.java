@@ -1,71 +1,70 @@
 package frc.robot.subsystems;
 
-import static edu.wpi.first.units.Units.Amps;
+import static edu.wpi.first.units.Units.RPM;
+import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.Seconds;
+import static edu.wpi.first.units.Units.Volts;
 
 import com.revrobotics.PersistMode;
 import com.revrobotics.ResetMode;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
+import com.revrobotics.spark.SparkBase.ControlType;
 import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 import com.revrobotics.spark.config.SparkMaxConfig;
 
 import edu.wpi.first.epilogue.Logged;
-import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.math.controller.ProfiledPIDController;
-import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Pose3d;
 import edu.wpi.first.math.geometry.Rotation2d;
 import edu.wpi.first.math.geometry.Rotation3d;
 import edu.wpi.first.math.geometry.Translation2d;
 import edu.wpi.first.math.geometry.Translation3d;
-import edu.wpi.first.math.system.plant.DCMotor;
-import edu.wpi.first.math.system.plant.LinearSystemId;
-import edu.wpi.first.math.trajectory.TrapezoidProfile.Constraints;
 import edu.wpi.first.math.util.Units;
-import edu.wpi.first.wpilibj.simulation.DCMotorSim;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
-import swervelib.simulation.ironmaple.simulation.motorsims.SimulatedBattery;
-import frc.robot.Robot;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Config;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Mechanism;
+import frc.robot.Constants;
 
 @Logged
 public class TurretSubsystem extends SubsystemBase {
     private final SwerveSubsystem drive;
-    private final SparkMax mTurret = new SparkMax(12, MotorType.kBrushless);
+    private final SparkMax mTurret = new SparkMax(Constants.CANConstants.TURRET, MotorType.kBrushless);
 
-    private final DCMotorSim mTurretSim = new DCMotorSim(
-            LinearSystemId.createDCMotorSystem(DCMotor.getNEO(1), 4 * 0.15 * 0.15 / 2.0, 10), DCMotor.getNEO(1));
+    public static final Translation2d kBlueHub = new Translation2d(Units.inchesToMeters(181.56),
+            Units.inchesToMeters(158.32));
+    public static final Translation2d kRedHub = new Translation2d(Units.inchesToMeters(650.12 - 181.56),
+            Units.inchesToMeters(158.32));
 
-    /**
-     * RPM to Volts TODO: Tune
-     */
-    private SimpleMotorFeedforward turretFF = new SimpleMotorFeedforward(0, 0);
-
-    /**
-     * Rotations to Volts TODO: Tune
-     */
-    private ProfiledPIDController turretController = new ProfiledPIDController(0, 0, 0,
-            new Constraints(2 * Math.PI, 2 * Math.PI));
+    private Translation2d target;
+    private boolean targetIsHub;
 
     public TurretSubsystem(SwerveSubsystem drive) {
         this.drive = drive;
 
-        if (Robot.isReal()) {
-            var turret = new SparkMaxConfig()
-                    .idleMode(IdleMode.kBrake);
-            turret.softLimit
-                    .forwardSoftLimit(200.0 / 20.0 * 0.5) // 180 degrees of motion on a 20:200 reduction
-                    .forwardSoftLimitEnabled(true)
-                    .reverseSoftLimit(0)
-                    .reverseSoftLimitEnabled(true);
+        var turret = new SparkMaxConfig()
+                .inverted(true)
+                .idleMode(IdleMode.kBrake);
 
-            mTurret.configure(turret, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-            mTurret.getEncoder().setPosition(0);
-        } else {
-            SimulatedBattery.addElectricalAppliances(() -> Amps.of(mTurretSim.getCurrentDrawAmps()));
-        }
+        turret.smartCurrentLimit(20, 20);
+
+        turret.closedLoop
+                .pid(1.250, 0.0, 0.0);
+
+        turret.softLimit
+                .forwardSoftLimit(4.70)
+                .forwardSoftLimitEnabled(true)
+                .reverseSoftLimit(0)
+                .reverseSoftLimitEnabled(true);
+
+        mTurret.configure(turret, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
     }
 
     /**
@@ -76,19 +75,15 @@ public class TurretSubsystem extends SubsystemBase {
      * @return Roation2d
      */
     public Rotation2d getTurretAngle() {
-        if (Robot.isSimulation()) {
-            return Rotation2d.fromRadians(mTurretSim.getAngularPositionRad());
-        } else {
-            return Rotation2d.fromRotations(mTurret.getEncoder().getPosition() * 20.0 / 200.0 - 0.25);
-        }
+        return Rotation2d.fromDegrees(mTurret.getEncoder().getPosition() * 36.0 - 85.28562);
+    }
+
+    public double getTurretVelocity() {
+        return mTurret.getEncoder().getVelocity();
     }
 
     public double getTurretVoltage() {
-        if (Robot.isSimulation()) {
-            return mTurretSim.getInputVoltage();
-        } else {
-            return mTurret.getAppliedOutput() * mTurret.getBusVoltage();
-        }
+        return mTurret.getAppliedOutput() * mTurret.getBusVoltage();
     }
 
     public Pose3d turretInFieldRelative() {
@@ -115,6 +110,14 @@ public class TurretSubsystem extends SubsystemBase {
         Rotation3d turretRotation = new Rotation3d(0, 0, turretYaw);
 
         return new Pose3d(turretTranslation, turretRotation);
+    }
+
+    public double turretRawValue() {
+        return mTurret.getEncoder().getPosition();
+    }
+
+    public double turretRawSetpoint() {
+        return mTurret.getClosedLoopController().getSetpoint();
     }
 
     /**
@@ -177,8 +180,7 @@ public class TurretSubsystem extends SubsystemBase {
      * @param maxAcceptableError is the maximum distance we're willing to be off by
      */
     public boolean isTurretAimedWithinTolerance(Translation2d target, double maxAcceptableError) {
-        double missDistance = getTurretAngleError(target).getSin() * distanceToTarget(target);
-        return Math.abs(missDistance) <= maxAcceptableError;
+        return true;
     }
 
     /**
@@ -192,27 +194,8 @@ public class TurretSubsystem extends SubsystemBase {
      * 5. Sends the combined voltage to the turret motor.
      */
     public void aimTurret(Rotation2d robotRelativeRotation) {
-        // Clamp to turret mechanical limits (±0.25 rotations = ±90 degrees)
-        double clampedGoalRotations = MathUtil.clamp(robotRelativeRotation.getRotations(), -0.25, 0.25);
-
-        // Tell the profiled PID controller our new goal position
-        turretController.setGoal(clampedGoalRotations);
-
-        // Feedback (PID) corrects position error
-        double feedbackVolts = turretController.calculate(getTurretAngle().getRotations());
-
-        // Feedforward predicts voltage needed to achieve desired velocity
-        // The controller's velocity is in rotations/sec but our FF expects
-        // rotations/min
-        double desiredVelocity = turretController.getSetpoint().velocity * 60.0;
-        double feedforwardVolts = turretFF.calculate(desiredVelocity);
-
-        // Combine feedback + feedforward
-        if (Robot.isReal()) {
-            mTurret.setVoltage(feedbackVolts + feedforwardVolts);
-        } else {
-            mTurretSim.setInputVoltage(feedbackVolts + feedforwardVolts);
-        }
+        mTurret.getClosedLoopController().setSetpoint((robotRelativeRotation.getDegrees() / 36.0 + 2.369045),
+                ControlType.kPosition);
     }
 
     /**
@@ -224,12 +207,55 @@ public class TurretSubsystem extends SubsystemBase {
         aimTurret(angleToTarget(target));
     }
 
+    public Command cForward() {
+        targetIsHub = false;
+        return run(() -> aimTurret(new Rotation2d()));
+    }
+
     public void stop() {
-        if (Robot.isReal()) {
-            mTurret.stopMotor();
+        mTurret.stopMotor();
+    }
+
+    public Command cWaitUntilPointingAtTarget() {
+        return Commands.waitUntil(() -> {
+            if (!targetIsHub)
+                return true;
+
+            return isTurretAimedWithinTolerance(kRedHub, 0.5);
+        });
+    }
+
+    public Command cTargetHub() {
+        return runEnd(() -> {
+            this.targetIsHub = true;
+            if (DriverStation.getAlliance().orElse(Alliance.Red).equals(Alliance.Red)) {
+                this.target = kRedHub;
+                aimTurret(kRedHub);
+            } else {
+                this.target = kBlueHub;
+                aimTurret(kBlueHub);
+            }
+        }, this::stop);
+    }
+
+    public void dynamicTarget() {
+        Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Red);
+        boolean isRed = alliance == Alliance.Red;
+
+        if (drive.isWithinAllianceZone()) {
+            this.targetIsHub = true;
+            this.target = isRed ? kRedHub : kBlueHub;
+            aimTurret(this.target);
+
         } else {
-            mTurretSim.setInputVoltage(0);
+            this.targetIsHub = false;
+            this.target = drive.getClosestAllianceCorner();
+            aimTurret(this.target); // ← critical fix
         }
+    }
+
+    public Command cDynamicTarget() {
+        return runEnd(this::dynamicTarget, this::stop);
     }
 
     /**
@@ -243,9 +269,31 @@ public class TurretSubsystem extends SubsystemBase {
     public Command cRunTurretSmartDashboard() {
         SmartDashboard.putNumber("Turret/targetDegrees", 0);
         return runEnd(() -> {
+            SmartDashboard.putBoolean("Turret/running", true);
             double angle = SmartDashboard.getNumber("Turret/targetDegrees", -90);
             aimTurret(Rotation2d.fromDegrees(angle));
-        }, this::stop);
+        }, () -> {
+            this.stop();
+            SmartDashboard.putBoolean("Turret/running", false);
+        });
+    }
+
+    public final SysIdRoutine launcherSysId = new SysIdRoutine(
+            new Config(Volts.of(0.25 / 5.0).per(Seconds), null, Seconds.of(5)), new Mechanism((voltage) -> {
+                mTurret.setVoltage(voltage.baseUnitMagnitude());
+            }, (log) -> {
+
+                log.motor("turret")
+                        .voltage(Volts.of(mTurret.getBusVoltage() * mTurret.getAppliedOutput()))
+                        .angularPosition(Rotations.of(mTurret.getEncoder().getPosition()))
+                        .angularVelocity(RPM.of(mTurret.getEncoder().getVelocity()));
+            }, this));
+
+    public Command sysid() {
+        return Commands.sequence(
+                launcherSysId.quasistatic(Direction.kForward),
+                run(this::stop).withTimeout(5),
+                launcherSysId.quasistatic(Direction.kReverse));
     }
 
 }

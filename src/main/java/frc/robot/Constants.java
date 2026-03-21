@@ -23,8 +23,19 @@ import swervelib.math.Matter;
 public final class Constants {
     public static final double ROBOT_MASS = 50.0; // kg
     public static final Matter CHASSIS = new Matter(new Translation3d(0, 0, Units.inchesToMeters(8)), ROBOT_MASS);
-    public static final double LOOP_TIME = 0.13; // s, 20ms + 110ms sprk max velocity lag
     
+    public static class CANConstants {
+        public static final int INTAKE_SPIN = 9; 
+        public static final int INTAKE_ARM = 10;
+
+        public static final int INDEXER_HOPPER = 11;
+        public static final int INDEXER_KICKER = 12;
+
+        public static final int TURRET = 20;
+        public static final int LAUNCHER_MAIN = 21;
+        public static final int LAUNCHER_SECONDARY = 22;
+    }
+
     /**
      * Maximum speed of the robot in meters per second, used to limit acceleration.
      */
@@ -39,5 +50,6 @@ public final class Constants {
     public static class OperatorConstants {
         // Joystick Deadband
         public static final double DEADBAND = 0.1;
+        public static final double TURN_CONSTANT = 0.8;
     }
 }

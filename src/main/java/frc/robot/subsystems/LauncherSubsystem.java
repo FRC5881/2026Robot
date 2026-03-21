@@ -6,9 +6,12 @@ import static edu.wpi.first.units.Units.Inches;
 import static edu.wpi.first.units.Units.MetersPerSecond;
 import static edu.wpi.first.units.Units.RPM;
 import static edu.wpi.first.units.Units.Rotations;
+import static edu.wpi.first.units.Units.Volts;
+
 
 import com.revrobotics.PersistMode;
 import com.revrobotics.ResetMode;
+import com.revrobotics.spark.SparkBase.ControlType;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 import com.revrobotics.spark.SparkMax;
 import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
@@ -25,13 +28,18 @@ import edu.wpi.first.math.kinematics.ChassisSpeeds;
 import edu.wpi.first.math.system.plant.DCMotor;
 import edu.wpi.first.math.system.plant.LinearSystemId;
 import edu.wpi.first.math.util.Units;
+import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.simulation.FlywheelSim;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
 import edu.wpi.first.wpilibj2.command.Command;
+import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Config;
+import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Direction;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Mechanism;
+import frc.robot.Constants;
 import frc.robot.Robot;
 import swervelib.simulation.ironmaple.simulation.SimulatedArena;
 import swervelib.simulation.ironmaple.simulation.motorsims.SimulatedBattery;
@@ -42,24 +50,22 @@ public class LauncherSubsystem extends SubsystemBase {
     private final SwerveSubsystem drive;
     private final TurretSubsystem turret;
 
+    public final double MIN_DISTANCE, MAX_DISTANCE;
+
     private FlywheelSim flywheelSim = new FlywheelSim(
-            LinearSystemId.createFlywheelSystem(DCMotor.getNEO(2),
-                    0.5 * Units.lbsToKilograms(2 * 1.1) * Math.pow(Units.inchesToMeters(2), 2), 1),
+            LinearSystemId.identifyVelocitySystem(Units.rotationsToRadians(0.30309),
+                    Units.rotationsToRadians(0.014391)),
             DCMotor.getNEO(2));
     public Rotation2d simulatedAngle = Rotation2d.kZero;
 
-    private final SparkMax mLauncherMain = new SparkMax(10, MotorType.kBrushless);
-    private final SparkMax mLauncherSecondary = new SparkMax(11, MotorType.kBrushless);
+    private final SparkMax mLauncherMain = new SparkMax(Constants.CANConstants.LAUNCHER_MAIN, MotorType.kBrushless);
+    private final SparkMax mLauncherSecondary = new SparkMax(Constants.CANConstants.LAUNCHER_SECONDARY,
+            MotorType.kBrushless);
 
-    /**
-     * RPM to Volts TODO: Tune
-     */
+    // kV 0.00206
+    // kS 0.15663
     private SimpleMotorFeedforward launcherFF = new SimpleMotorFeedforward(0, 11.0 / 5293.75);
-
-    /**
-     * RPM to Volts TODO: Tune
-     */
-    private PIDController launcherPID = new PIDController(0.0005, 0, 0);
+    private PIDController launcherPID = new PIDController(0.0004, 0, 0.001);
 
     /**
      * Maps distance (meters) to desired launcher velocity (rpm) for scoring in the
@@ -73,13 +79,21 @@ public class LauncherSubsystem extends SubsystemBase {
      */
     private InterpolatingDoubleTreeMap passingDistanceMap = new InterpolatingDoubleTreeMap();
 
+    private double targetRPM = 0;
+
     public LauncherSubsystem(SwerveSubsystem drive, TurretSubsystem turret) {
         this.drive = drive;
         this.turret = turret;
 
         if (Robot.isReal()) {
             var main = new SparkMaxConfig()
-                    .idleMode(IdleMode.kCoast);
+                    .idleMode(IdleMode.kCoast)
+                    .inverted(false);
+
+            main.closedLoop.pid(0.0003, 0.0, 0.002);
+            // main.closedLoop.pid(0.0, 0.0, 0.0);
+            main.closedLoop.feedForward
+                    .sva(0.1565 - 0.00206 * 60, 0.00206, 0.0);
 
             mLauncherMain.configure(main, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
 
@@ -93,12 +107,21 @@ public class LauncherSubsystem extends SubsystemBase {
         }
 
         // hub tuning
-        hubDistanceMap.put(0.0, 0.0);
-        hubDistanceMap.put(5.38, 5600.0);
+        MIN_DISTANCE = 1.75;
+        hubDistanceMap.put(1.75, 2775.0);
+        hubDistanceMap.put(2.0, 2900.0);
+        hubDistanceMap.put(3.0, 3300.0);
+        hubDistanceMap.put(4.0, 3450.0);
+        hubDistanceMap.put(5.0, 3800.0);
+        hubDistanceMap.put(5.5, 4000.0);
+        MAX_DISTANCE = 5.5;
 
         // passing tuning
-        passingDistanceMap.put(0.0, 0.0);
-        passingDistanceMap.put(6.00, 5600.0);
+        passingDistanceMap.put(0.0, 2000.0);
+        passingDistanceMap.put(Units.feetToMeters(9.0), 2600.0);
+        passingDistanceMap.put(Units.feetToMeters(16.0), 3500.0);
+        passingDistanceMap.put(Units.feetToMeters(23.0), 4400.0);
+        passingDistanceMap.put(Units.feetToMeters(100.0), 5500.0);
     }
 
     public double getLauncherVoltage() {
@@ -123,15 +146,7 @@ public class LauncherSubsystem extends SubsystemBase {
      * @param desiredVelocityRPM
      */
     private void runLauncher(double desiredVelocityRPM) {
-        double feedforwardVolts = launcherFF.calculate(desiredVelocityRPM);
-        double currentVelocityRPM = flywheelSim.getAngularVelocityRPM();
-        double feedbackVolts = launcherPID.calculate(currentVelocityRPM, desiredVelocityRPM);
-
-        if (Robot.isSimulation()) {
-            flywheelSim.setInputVoltage(feedforwardVolts + feedbackVolts);
-        } else {
-            mLauncherMain.setVoltage(feedforwardVolts + feedbackVolts);
-        }
+            mLauncherMain.getClosedLoopController().setSetpoint(desiredVelocityRPM, ControlType.kVelocity);
     }
 
     /**
@@ -143,13 +158,44 @@ public class LauncherSubsystem extends SubsystemBase {
         // Select the correct distance-to-velocity map depending on which target we are
         // using. Different targets require different trajectories.
         double distanceMeters = turret.distanceToTarget(target);
+        SmartDashboard.putNumber("Launcher/distanceToHub", distanceMeters);
         if (isHub) {
             velocity = hubDistanceMap.get(distanceMeters);
         } else {
             velocity = passingDistanceMap.get(distanceMeters);
         }
 
+        targetRPM = velocity;
         runLauncher(velocity);
+    }
+
+    public Command cWaitUntilTargetSpeed() {
+        return Commands.waitUntil(() -> Math.abs(getLauncherVelocityRPM() - targetRPM) <= 100);
+    }
+
+    public void dynamicShoot() {
+        Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Red);
+        boolean isRed = alliance == Alliance.Red;
+
+        boolean targetIsHub;
+        Translation2d target;
+        if (drive.isWithinAllianceZone()) {
+            targetIsHub = true;
+            target = isRed ? TurretSubsystem.kRedHub : TurretSubsystem.kBlueHub;
+        } else {
+            targetIsHub = false;
+            target = drive.getClosestAllianceCorner();
+        }
+
+        runLauncher(target, targetIsHub);
+    }
+
+    public Command cRunHub() {
+        return runEnd(() -> {
+            Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Red);
+            Translation2d target = alliance == Alliance.Red ? TurretSubsystem.kRedHub : TurretSubsystem.kBlueHub;
+            runLauncher(target, true);
+        }, this::stop);
     }
 
     /**
@@ -168,10 +214,31 @@ public class LauncherSubsystem extends SubsystemBase {
         }, this::stop);
     }
 
+    public boolean inTargetRange(Translation2d target, boolean isHub) {
+        double distanceMeters = turret.distanceToTarget(target);
+        return isHub || (MAX_DISTANCE >= distanceMeters && distanceMeters >= MIN_DISTANCE);
+    }
+
+    public void setVoltage(double voltage) {
+        if (Robot.isSimulation()) {
+            flywheelSim.setInputVoltage(voltage);
+        } else {
+            mLauncherMain.setVoltage(voltage);
+        }
+    }
+
+    public Command cRunVelocity(double velocity) {
+        return runEnd(() -> runLauncher(velocity), this::stop);
+    }
+
+    public Command cRunVoltage(double voltage) {
+        return runEnd(() -> setVoltage(voltage), mLauncherMain::stopMotor);
+    }
+
     /**
      * Stops the launcher flywheel.
      */
-    private void stop() {
+    public void stop() {
         if (Robot.isSimulation()) {
             flywheelSim.setInputVoltage(0.0);
         } else {
@@ -217,7 +284,20 @@ public class LauncherSubsystem extends SubsystemBase {
         }
     }, (log) -> {
         log.motor("launcher")
+                .voltage(Volts.of(mLauncherMain.getBusVoltage() * mLauncherMain.getAppliedOutput()))
                 .angularPosition(Rotations.of(mLauncherMain.getEncoder().getPosition()))
                 .angularVelocity(RPM.of(mLauncherMain.getEncoder().getVelocity()));
     }, this));
+
+    public Command sysid() {
+        return Commands.sequence(
+                launcherSysId.quasistatic(Direction.kForward),
+                cRunVoltage(0).withTimeout(10),
+                launcherSysId.quasistatic(Direction.kReverse),
+                cRunVoltage(0).withTimeout(10),
+                launcherSysId.dynamic(Direction.kForward),
+                cRunVoltage(0).withTimeout(10),
+                launcherSysId.dynamic(Direction.kReverse),
+                cRunVoltage(0).withTimeout(10));
+    }
 }

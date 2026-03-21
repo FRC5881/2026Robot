@@ -6,6 +6,16 @@ package frc.robot.subsystems;
 
 import static edu.wpi.first.units.Units.Meter;
 
+import java.io.File;
+import java.io.IOException;
+import java.util.Arrays;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.DoubleSupplier;
+import java.util.function.Supplier;
+
+import org.json.simple.parser.ParseException;
+
 import com.pathplanner.lib.auto.AutoBuilder;
 import com.pathplanner.lib.commands.PathPlannerAuto;
 import com.pathplanner.lib.commands.PathfindingCommand;
@@ -18,8 +28,6 @@ import com.pathplanner.lib.util.DriveFeedforwards;
 import com.pathplanner.lib.util.swerve.SwerveSetpoint;
 import com.pathplanner.lib.util.swerve.SwerveSetpointGenerator;
 
-import edu.wpi.first.epilogue.Logged;
-import edu.wpi.first.hal.AllianceStationID;
 import edu.wpi.first.math.controller.SimpleMotorFeedforward;
 import edu.wpi.first.math.geometry.Pose2d;
 import edu.wpi.first.math.geometry.Rotation2d;
@@ -29,24 +37,14 @@ import edu.wpi.first.math.kinematics.SwerveDriveKinematics;
 import edu.wpi.first.math.trajectory.Trajectory;
 import edu.wpi.first.math.util.Units;
 import edu.wpi.first.wpilibj.DriverStation;
+import edu.wpi.first.wpilibj.DriverStation.Alliance;
 import edu.wpi.first.wpilibj.Timer;
-import edu.wpi.first.wpilibj.simulation.DriverStationSim;
-import edu.wpi.first.wpilibj.smartdashboard.Field2d;
 import edu.wpi.first.wpilibj2.command.Command;
 import edu.wpi.first.wpilibj2.command.Commands;
 import edu.wpi.first.wpilibj2.command.SubsystemBase;
 import edu.wpi.first.wpilibj2.command.sysid.SysIdRoutine.Config;
 import frc.robot.Constants;
-import frc.robot.Robot;
-
-import java.io.File;
-import java.io.IOException;
-import java.util.Arrays;
-import java.util.Optional;
-import java.util.concurrent.atomic.AtomicReference;
-import java.util.function.DoubleSupplier;
-import java.util.function.Supplier;
-import org.json.simple.parser.ParseException;
+import frc.robot.FieldConstants;
 import swervelib.SwerveController;
 import swervelib.SwerveDrive;
 import swervelib.SwerveDriveTest;
@@ -58,7 +56,6 @@ import swervelib.simulation.ironmaple.simulation.drivesims.SwerveDriveSimulation
 import swervelib.telemetry.SwerveDriveTelemetry;
 import swervelib.telemetry.SwerveDriveTelemetry.TelemetryVerbosity;
 
-@Logged
 public class SwerveSubsystem extends SubsystemBase {
   /**
    * Swerve drive object.
@@ -81,36 +78,32 @@ public class SwerveSubsystem extends SubsystemBase {
    * @param directory Directory of swerve drive config files.
    */
   public SwerveSubsystem(File directory) {
-    DriverStationSim.setAllianceStationId(AllianceStationID.Blue2);
+    // boolean blueAlliance = DriverStation.getAlliance().isPresent()
+    //     && DriverStation.getAlliance().get() == Alliance.Blue;
+
     boolean blueAlliance = true;
-    Pose2d startingPose = blueAlliance ? new Pose2d(new Translation2d(
-        //Dont lose this again
-        Meter.of(1),
-        Meter.of(1)),
-        Rotation2d.fromDegrees(4))
+
+    Pose2d startingPose = blueAlliance ? new Pose2d(new Translation2d(Meter.of(3.7),
+        Meter.of(0.5)), // 8.08
+        Rotation2d.fromDegrees(0))
         : new Pose2d(new Translation2d(Meter.of(16),
             Meter.of(4)),
             Rotation2d.fromDegrees(180));
-
     // Configure the Telemetry before creating the SwerveDrive to avoid unnecessary
     // objects being created.
     SwerveDriveTelemetry.verbosity = TelemetryVerbosity.HIGH;
     try {
       swerveDrive = new SwerveParser(directory).createSwerveDrive(Constants.MAX_SPEED, startingPose);
-      // Alternative method if you don't want to supply the conversion factor via JSON
-      // files.
-      // swerveDrive = new SwerveParser(directory).createSwerveDrive(maximumSpeed,
-      // angleConversionFactor, driveConversionFactor);
     } catch (Exception e) {
       throw new RuntimeException(e);
     }
 
     // Heading correction should only be used while controlling the robot via angle.
-    swerveDrive.setHeadingCorrection(false);
+    swerveDrive.setHeadingCorrection(true);
 
     // Disables cosine compensation for simulations since it causes discrepancies
     // not seen in real life.
-    swerveDrive.setCosineCompensator(Robot.isReal());
+    swerveDrive.setCosineCompensator(!SwerveDriveTelemetry.isSimulation);
 
     // Correct for skew that gets worse as angular velocity increases. Start with a
     // coefficient of 0.1.
@@ -120,22 +113,19 @@ public class SwerveSubsystem extends SubsystemBase {
 
     // Enable if you want to resynchronize your absolute encoders and motor encoders
     // periodically when they are not moving.
-    swerveDrive.setModuleEncoderAutoSynchronize(false, 1);
+    swerveDrive.setModuleEncoderAutoSynchronize(false,
+        1);
 
-    // swerveDrive.pushOffsetsToEncoders(); // Set the absolute encoder to be used
-    // over the internal encoder and push the offsets onto it. Throws warning if not
-    // possible
+    // Set the absolute encoder to be used over the internal encoder and push the
+    // offsets onto it. Throws warning if not possible
+    // swerveDrive.pushOffsetsToEncoders();
+
     if (visionDriveTest) {
       setupPhotonVision();
-      // Stop the odometry thread if we are using vision that way we can synchronize
-      // updates better.
       swerveDrive.stopOdometryThread();
     }
-    setupPathPlanner();
-  }
 
-  public Optional<SwerveDriveSimulation> getMapleSimDrive() {
-    return swerveDrive.getMapleSimDrive();
+    setupPathPlanner();
   }
 
   /**
@@ -148,8 +138,12 @@ public class SwerveSubsystem extends SubsystemBase {
     swerveDrive = new SwerveDrive(driveCfg,
         controllerCfg,
         Constants.MAX_SPEED,
-        new Pose2d(new Translation2d(Meter.of(2), Meter.of(2)),
+        new Pose2d(new Translation2d(Meter.of(2), Meter.of(0)),
             Rotation2d.fromDegrees(0)));
+  }
+
+  public Optional<SwerveDriveSimulation> getMapleSimDrive() {
+    return swerveDrive.getMapleSimDrive();
   }
 
   /**
@@ -168,10 +162,8 @@ public class SwerveSubsystem extends SubsystemBase {
     }
   }
 
-
   @Override
   public void simulationPeriodic() {
-    
   }
 
   /**
@@ -184,7 +176,7 @@ public class SwerveSubsystem extends SubsystemBase {
     try {
       config = RobotConfig.fromGUISettings();
 
-      final boolean enableFeedforward = true;
+      final boolean enableFeedforward = false;
       // Configure AutoBuilder last
       AutoBuilder.configure(
           this::getPose,
@@ -287,12 +279,10 @@ public class SwerveSubsystem extends SubsystemBase {
       throws IOException, ParseException {
     SwerveSetpointGenerator setpointGenerator = new SwerveSetpointGenerator(RobotConfig.fromGUISettings(),
         swerveDrive.getMaximumChassisAngularVelocity());
-
     AtomicReference<SwerveSetpoint> prevSetpoint = new AtomicReference<>(
         new SwerveSetpoint(swerveDrive.getRobotVelocity(),
             swerveDrive.getStates(),
             DriveFeedforwards.zeros(swerveDrive.getModules().length)));
-
     AtomicReference<Double> previousTime = new AtomicReference<>();
 
     return startRun(() -> previousTime.set(Timer.getFPGATimestamp()),
@@ -360,19 +350,33 @@ public class SwerveSubsystem extends SubsystemBase {
    * @return a Command that centers the modules of the SwerveDrive subsystem
    */
   public Command centerModulesCommand() {
-    return run(() -> Arrays.asList(swerveDrive.getModules()).forEach(it -> it.setAngle(0.0)));
+    return run(() -> Arrays.asList(swerveDrive.getModules())
+        .forEach(it -> it.setAngle(0.0)));
   }
 
   /**
    * Returns a Command that tells the robot to drive forward until the command
    * ends.
-   * 
+   *
    * @return a Command that tells the robot to drive forward until the command
    *         ends
    */
   public Command driveForward() {
     return run(() -> {
-      swerveDrive.drive(new Translation2d(1, 0), 0, false, false);
+      swerveDrive.drive(new Translation2d(1, 0), 0, false, true);
+    }).finallyDo(() -> swerveDrive.drive(new Translation2d(0, 0), 0, false, false));
+  }
+
+  /**
+   * Returns a Command that tells the robot to drive forward until the command
+   * ends.
+   *
+   * @return a Command that tells the robot to drive forward until the command
+   *         ends
+   */
+  public Command driveReverse() {
+    return run(() -> {
+      swerveDrive.drive(new Translation2d(-1, 0), 0, false, true);
     }).finallyDo(() -> swerveDrive.drive(new Translation2d(0, 0), 0, false, false));
   }
 
@@ -503,14 +507,6 @@ public class SwerveSubsystem extends SubsystemBase {
   }
 
   /**
-   * Returns the simulated Field
-   * @return {@link Field2d}
-   */
-  public Field2d getField() {
-    return swerveDrive.field;
-  }
-
-  /**
    * Get the swerve drive kinematics object.
    *
    * @return {@link SwerveDriveKinematics} of the swerve drive.
@@ -540,6 +536,50 @@ public class SwerveSubsystem extends SubsystemBase {
    */
   public Pose2d getPose() {
     return swerveDrive.getPose();
+  }
+
+  /**
+   * Checks the current pose (as reported by odometry) is within
+   * the our alliance zone
+   */
+  public boolean isWithinAllianceZone() {
+    double x = getPose().getTranslation().getX();
+
+    double center = Units.inchesToMeters(325.61);
+    double offset = Units.inchesToMeters(120.0);
+
+    double neutralMin = center - offset;
+    double neutralMax = center + offset;
+
+    boolean isBlue = DriverStation.getAlliance()
+        .orElse(Alliance.Red) == Alliance.Blue;
+
+    if (isBlue) {
+      return x < neutralMin; // strictly on blue side, outside neutral
+    } else {
+      return x > neutralMax; // strictly on red side, outside neutral
+    }
+  }
+
+  public Translation2d getClosestAllianceCorner() {
+    Translation2d pose = getPose().getTranslation();
+
+    Translation2d[] targets = DriverStation.getAlliance().orElse(Alliance.Red).equals(Alliance.Blue)
+        ? FieldConstants.BLUE_TARGETS
+        : FieldConstants.RED_TARGETS;
+
+    Translation2d closest = targets[0];
+    double minDist = pose.getDistance(closest);
+
+    for (int i = 1; i < targets.length; i++) {
+      double dist = pose.getDistance(targets[i]);
+      if (dist < minDist) {
+        minDist = dist;
+        closest = targets[i];
+      }
+    }
+
+    return closest;
   }
 
   /**
@@ -692,6 +732,14 @@ public class SwerveSubsystem extends SubsystemBase {
   public SwerveDriveConfiguration getSwerveDriveConfiguration() {
     return swerveDrive.swerveDriveConfiguration;
   }
+
+  /**
+   * Lock the swerve drive to prevent it from moving.
+   */
+  public Command cLock() {
+    return run(swerveDrive::lockPose);
+  }
+
 
   /**
    * Lock the swerve drive to prevent it from moving.
