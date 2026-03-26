@@ -81,13 +81,13 @@ public class SwerveSubsystem extends SubsystemBase {
     // boolean blueAlliance = DriverStation.getAlliance().isPresent()
     //     && DriverStation.getAlliance().get() == Alliance.Blue;
 
-    boolean blueAlliance = true;
+    boolean blueAlliance = false;
 
     Pose2d startingPose = blueAlliance ? new Pose2d(new Translation2d(Meter.of(3.7),
-        Meter.of(0.5)), // 8.08
+        Meter.of(Units.inchesToMeters(30))), // 8.08
         Rotation2d.fromDegrees(0))
-        : new Pose2d(new Translation2d(Meter.of(16),
-            Meter.of(4)),
+        : new Pose2d(new Translation2d(Meter.of(13),
+            Meter.of(4.0)), // 0.75
             Rotation2d.fromDegrees(180));
     // Configure the Telemetry before creating the SwerveDrive to avoid unnecessary
     // objects being created.
@@ -375,9 +375,9 @@ public class SwerveSubsystem extends SubsystemBase {
    *         ends
    */
   public Command driveReverse() {
-    return run(() -> {
+    return runEnd(() -> {
       swerveDrive.drive(new Translation2d(-1, 0), 0, false, true);
-    }).finallyDo(() -> swerveDrive.drive(new Translation2d(0, 0), 0, false, false));
+    }, () -> swerveDrive.drive(new Translation2d(0, 0), 0, false, false));
   }
 
   /**

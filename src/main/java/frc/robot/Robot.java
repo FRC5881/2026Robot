@@ -55,9 +55,6 @@ public class Robot extends TimedRobot {
     shooter = new LauncherSubsystem(drivebase, turret);
 
     autoChooser = new SendableChooser<>();
-    autoChooser.addOption("Drive Reverse", drivebase.driveReverse().withTimeout(2.5));
-
-    SmartDashboard.putData("autoChooser", autoChooser);
 
     /**
      * Converts driver input into a field-relative ChassisSpeeds that is controlled
@@ -75,7 +72,7 @@ public class Robot extends TimedRobot {
 
     driver.L1().whileTrue(intake.cRunIntake());
 
-    Command shootStraightCommand = shooter.cRunVelocity(3000).alongWith(turret.cTargetHub())
+    Command shootStraightCommand = shooter.cRunVelocity(3000).alongWith(turret.cForward())
         .alongWith(
             Commands.waitSeconds(1.25).andThen(
                 indexer.cRun(() -> driver.getHID().getCrossButtonPressed())));
@@ -89,7 +86,7 @@ public class Robot extends TimedRobot {
                 .andThen(turret.cWaitUntilPointingAtTarget())
                 .andThen(indexer.cRun(() -> driver.getHID().getCrossButtonPressed())));
 
-    autoChooser.addOption("Drive Reverse and shoot", drivebase.driveReverse().withTimeout(1.0).andThen(shootCommand));
+    autoChooser.addOption("SHOOT", shootCommand.withTimeout(5.0));
 
     Command shootCommand2 = shooter.cRunHub()
         .alongWith(turret.cTargetHub())
@@ -108,6 +105,7 @@ public class Robot extends TimedRobot {
     driver.R3().onTrue(Commands.runOnce(drivebase::zeroGyroWithAlliance, drivebase));
 
     Epilogue.bind(this);
+    SmartDashboard.putData("autoChooser", autoChooser);
   }
 
   @Override

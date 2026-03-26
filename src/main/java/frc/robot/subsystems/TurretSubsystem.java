@@ -228,13 +228,16 @@ public class TurretSubsystem extends SubsystemBase {
     public Command cTargetHub() {
         return runEnd(() -> {
             this.targetIsHub = true;
-            if (DriverStation.getAlliance().orElse(Alliance.Red).equals(Alliance.Red)) {
-                this.target = kRedHub;
+                            this.target = kRedHub;
                 aimTurret(kRedHub);
-            } else {
-                this.target = kBlueHub;
-                aimTurret(kBlueHub);
-            }
+
+            // if (DriverStation.getAlliance().orElse(Alliance.Red).equals(Alliance.Red)) {
+            //     this.target = kRedHub;
+            //     aimTurret(kRedHub);
+            // } else {
+            //     this.target = kBlueHub;
+            //     aimTurret(kBlueHub);
+            // }
         }, this::stop);
     }
 

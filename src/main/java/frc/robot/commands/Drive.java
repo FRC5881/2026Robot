@@ -34,10 +34,10 @@ public class Drive extends Command {
         targetSpeed.vxMetersPerSecond *= Preferences.getDouble("Drive Sensitivity", 1.0);
         targetSpeed.vyMetersPerSecond *= Preferences.getDouble("Drive Sensitivity", 1.0);
 
-        if (DriverStation.getAlliance().orElse(Alliance.Red).equals(Alliance.Red)) {
-            targetSpeed.vxMetersPerSecond *= -1;
-            targetSpeed.vyMetersPerSecond *= -1;
-        }
+         if (DriverStation.getAlliance().orElse(Alliance.Red).equals(Alliance.Red)) {
+             targetSpeed.vxMetersPerSecond *= -1;
+             targetSpeed.vyMetersPerSecond *= -1;
+         }
 
         swerve.driveFieldOriented(targetSpeed);
 

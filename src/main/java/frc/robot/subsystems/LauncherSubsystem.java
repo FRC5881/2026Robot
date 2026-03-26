@@ -194,7 +194,9 @@ public class LauncherSubsystem extends SubsystemBase {
         return runEnd(() -> {
             Alliance alliance = DriverStation.getAlliance().orElse(Alliance.Red);
             Translation2d target = alliance == Alliance.Red ? TurretSubsystem.kRedHub : TurretSubsystem.kBlueHub;
-            runLauncher(target, true);
+            // runLauncher(target, true);
+                        runLauncher(TurretSubsystem.kRedHub, true);
+
         }, this::stop);
     }
 
